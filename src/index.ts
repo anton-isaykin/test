@@ -10,18 +10,14 @@ export default {
 	},
 } satisfies ExportedHandler<Env>;
 
+let tableReady = false;
+
 async function ensureTable(db: D1Database) {
-	await db.exec(`
-		CREATE TABLE IF NOT EXISTS appointments (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			email TEXT NOT NULL,
-			date TEXT NOT NULL,
-			time TEXT NOT NULL,
-			created_at TEXT DEFAULT (datetime('now')),
-			UNIQUE(date, time)
-		)
-	`);
+	if (tableReady) return;
+	await db.prepare(
+		'CREATE TABLE IF NOT EXISTS appointments (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT DEFAULT (datetime(\'now\')), UNIQUE(date, time))'
+	).run();
+	tableReady = true;
 }
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -36,7 +32,12 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
 		return new Response(null, { headers });
 	}
 
-	await ensureTable(env.DB);
+	try {
+		await ensureTable(env.DB);
+	} catch (e: unknown) {
+		const message = e instanceof Error ? e.message : String(e);
+		return new Response(JSON.stringify({ error: 'Database initialization failed: ' + message }), { status: 500, headers });
+	}
 
 	if (url.pathname === '/api/appointments' && request.method === 'GET') {
 		const from = url.searchParams.get('from');
@@ -46,11 +47,16 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
 			return new Response(JSON.stringify({ error: 'Missing from/to parameters' }), { status: 400, headers });
 		}
 
-		const result = await env.DB.prepare(
-			'SELECT date, time FROM appointments WHERE date >= ? AND date <= ? ORDER BY date, time'
-		).bind(from, to).all();
+		try {
+			const result = await env.DB.prepare(
+				'SELECT date, time FROM appointments WHERE date >= ? AND date <= ? ORDER BY date, time'
+			).bind(from, to).all();
 
-		return new Response(JSON.stringify(result.results), { headers });
+			return new Response(JSON.stringify(result.results), { headers });
+		} catch (e: unknown) {
+			const message = e instanceof Error ? e.message : String(e);
+			return new Response(JSON.stringify({ error: 'Failed to fetch appointments: ' + message }), { status: 500, headers });
+		}
 	}
 
 	if (url.pathname === '/api/appointments' && request.method === 'POST') {
@@ -94,7 +100,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
 			if (message.includes('UNIQUE constraint failed')) {
 				return new Response(JSON.stringify({ error: 'This time slot is already booked' }), { status: 409, headers });
 			}
-			return new Response(JSON.stringify({ error: 'Failed to create appointment' }), { status: 500, headers });
+			return new Response(JSON.stringify({ error: 'Failed to create appointment: ' + message }), { status: 500, headers });
 		}
 	}
 
