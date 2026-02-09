@@ -6,3 +6,8 @@ account_id = "37863d8a0916ceea23ac3152e73b3ce6"
 
 [assets]
 directory = "./public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "test"
+database_id = "12f930b7-abb6-4c68-8ea3-d5d766d718ff"
